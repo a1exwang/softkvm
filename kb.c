@@ -67,10 +67,13 @@ int main() {
     memset(&ev, 0, sizeof(ev));
     int n = read(0, buf, sizeof(buf));
 
-    ret = write(fd, buf, n);
+    int written = 0;
+    while (written < n) {
+      written += write(fd, buf + written, n - written);
+    }
 
-    if (ret < n || ret < 0) {
-      fprintf(stderr, "write file failed");
+    if (ret < 0) {
+      fprintf(stderr, "write file failed %d, need %d\n", ret, n);
       break;
     }
   }
