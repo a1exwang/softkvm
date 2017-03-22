@@ -32,7 +32,7 @@ if devs.include?(ev)
   ids.each do |id, _|
     `xinput float #{id} &> /dev/null` 
   end
-  STDOUT.puts "/dev/input/#{ev}"
+  STDOUT.print "/dev/input/#{ev}"
 else
   STDERR.puts 'Wrong file name'
 end

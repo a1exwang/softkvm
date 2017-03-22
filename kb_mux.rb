@@ -1,0 +1,50 @@
+#!/usr/bin/env ruby
+require 'json'
+require 'socket'
+require './input_event_parser'
+
+
+client_sockets = []
+Thread.new do
+  tcp_server = TCPServer.new('0.0.0.0', 8223)
+  loop do
+    client_sockets << tcp_server.accept
+  end
+end
+
+loop do
+  current_server = 0
+  while client_sockets.size == 0
+    sleep 1
+  end
+
+  begin
+    while STDIN.read_nonblock(1); end
+  rescue IO::EAGAINWaitReadable
+  end
+
+  loop do
+    raw = STDIN.read(24)
+    op, out = parse_kb_code(raw)
+    if op == :through
+      begin
+        client_sockets[current_server].write out
+      rescue Errno::EPIPE
+        client_sockets.delete_at(current_server)
+        current_server -= 1
+        current_server = 0 if current_server < 0
+        break if client_sockets.count == 0
+      end
+    elsif op == :swallow
+      if out == :previous
+        # previous
+        current_server -= 1
+        current_server %= client_sockets.count
+      elsif out == :next
+        current_server += 1
+        current_server %= client_sockets.count
+        # next
+      end
+    end
+  end
+end
