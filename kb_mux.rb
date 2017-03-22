@@ -19,7 +19,7 @@ loop do
   end
 
   begin
-    while STDIN.read_nonblock(1); end
+    while STDIN.read_nonblock(24); end
   rescue IO::EAGAINWaitReadable
   end
 
