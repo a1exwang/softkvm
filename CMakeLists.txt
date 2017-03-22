@@ -1,5 +1,5 @@
 CMAKE_MINIMUM_REQUIRED (VERSION 2.8.11)
 
-PROJECT(alex-vkeyboard)
+PROJECT(alex-vinput)
 
-ADD_EXECUTABLE(vkey kb.c)
+ADD_EXECUTABLE(vinput kb.c)

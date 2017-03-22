@@ -3,10 +3,15 @@ require 'json'
 require 'socket'
 require_relative './input_event_parser'
 
+server_port = 8224
+if ARGV.size > 0
+  server_port = ARGV[0].to_i
+end
+
 
 client_sockets = []
 Thread.new do
-  tcp_server = TCPServer.new('0.0.0.0', 8223)
+  tcp_server = TCPServer.new('0.0.0.0', server_port)
   loop do
     client_sockets << tcp_server.accept
   end

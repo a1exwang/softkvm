@@ -24,7 +24,7 @@ KEY_LALT = 56
 @keys = Hash.new(0)
 
 def parse_kb_code(raw)
-  _s, _us, type, code, val = raw.unpack('QQSSl')
+  s, us, type, code, val = raw.unpack('QQSSl')
   if TYPES[type] == 'key' && [KEYVAL_UP, KEYVAL_DOWN].include?(val)
     if @keys[KEY_LCTRL] == KEYVAL_DOWN && @keys[KEY_LALT] == KEYVAL_DOWN
       if code == KEY_Q && val == KEYVAL_DOWN
@@ -36,7 +36,10 @@ def parse_kb_code(raw)
 
     @keys[code] = val
     # STDERR.puts "%d %06d %s %03d %08x" % [s, us, TYPES[type], code, val]
+  elsif TYPES[type] == 'rel'
+    # STDERR.puts "%d %06d %s %03d %08x" % [s, us, TYPES[type], code, val]
   end
+  STDERR.puts "%d %06d %s %03d %08x" % [s, us, TYPES[type], code, val]
   [:through, raw]
 end
 

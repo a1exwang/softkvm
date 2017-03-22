@@ -1,4 +1,10 @@
 #!/usr/bin/env ruby
+#
+input_port = 8224
+if ARGV.size > 0
+  input_port = ARGV[0].to_i
+end
+
 input_dir = '/dev/input'
 devs = {}
 Dir.entries(input_dir).each do |f|

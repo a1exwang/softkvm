@@ -6,13 +6,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-int setup_uidev(const char *name) {
-  int fd = open("/dev/uinput", O_WRONLY);
-  if (fd <= 0) {
-    fprintf(stderr, "Failed to open /dev/uinput\n");
-    perror(NULL);
-    exit(1);
-  }
+#define INPUT_BUFFER_SIZE 0x400
+const char *MY_UIDEV_NAME = "awvinput0";
+
+int setup_keyboard_dev(int fd) {
   if (ioctl(fd, UI_SET_EVBIT, EV_KEY) < 0) {
     fprintf(stderr, "ioctl: UI_SET_EVBIT failed\n");
     perror(NULL);
@@ -22,14 +19,45 @@ int setup_uidev(const char *name) {
     perror(NULL);
     exit(1);
   }
-  for (int i = 0; i < 256; ++i) {
+  if (ioctl(fd, UI_SET_EVBIT, EV_MSC) < 0) {
+    perror(NULL);
+    exit(1);
+  }
+  for (int i = 0; i < KEY_CNT; ++i) {
     if (ioctl(fd, UI_SET_KEYBIT, i) < 0) {
       perror(NULL);
       exit(1);
     }
   }
 
-  /* Create a uidev device */
+  if (ioctl(fd, UI_SET_EVBIT, EV_REL) < 0) {
+    perror(NULL);
+    exit(1);
+  }
+  if (ioctl(fd, UI_SET_RELBIT, REL_X) < 0) {
+    perror(NULL);
+    exit(1);
+  }
+  if (ioctl(fd, UI_SET_RELBIT, REL_Y) < 0) {
+    perror(NULL);
+    exit(1);
+  }
+  if (ioctl(fd, UI_SET_RELBIT, REL_WHEEL) < 0) {
+    perror(NULL);
+    exit(1);
+  }
+  return 0;
+}
+
+int setup_uidev(const char *name) {
+  int fd = open("/dev/uinput", O_WRONLY);
+  if (fd <= 0) {
+    fprintf(stderr, "Failed to open /dev/uinput\n");
+    perror(NULL);
+    exit(1);
+  }
+  setup_keyboard_dev(fd);
+
   struct uinput_user_dev uidev;
 
   memset(&uidev, 0, sizeof(uidev));
@@ -53,13 +81,16 @@ int setup_uidev(const char *name) {
   return fd;
 }
 
-#define INPUT_BUFFER_SIZE 0x400
 
-int main() {
+int main(int argc, const char **argv) {
+  const char *my_dev_name = MY_UIDEV_NAME;
+  if (argc >= 2) {
+    my_dev_name = argv[1];
+  }
   int ret;
 
-  int fd = setup_uidev("awvkey0");
-  printf("Virtual keyboard created..\n");
+  int fd = setup_uidev(my_dev_name);
+  printf("Virtual uinput device created..\n");
   char buf[INPUT_BUFFER_SIZE];
   while (1) {
     struct input_event ev;
