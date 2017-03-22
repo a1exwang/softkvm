@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 require 'json'
 require 'socket'
-require './input_event_parser'
+require_relative './input_event_parser'
 
 
 client_sockets = []
@@ -25,6 +25,12 @@ loop do
 
   loop do
     raw = STDIN.read(24)
+    if raw.nil?
+      client_sockets.delete_at(current_server)
+      current_server -= 1
+      current_server = 0 if current_server < 0
+      break if client_sockets.count == 0
+    end
     op, out = parse_kb_code(raw)
     if op == :through
       begin
