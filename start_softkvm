@@ -1,0 +1,10 @@
+#!/bin/bash
+set -xe
+
+if [ $# -ne 1 ]; then
+  echo "USAGE: ./start_softkvm PORT"
+fi
+
+PORT=$1
+nc -lk $(expr $PORT + 1) | ruby /home/alexwang/usr/softkvm/uinput_mux.rb $PORT
+nc -lk $(expr $PORT + 3) | ruby /home/alexwang/usr/softkvm/uinput_mux.rb $(expr $PORT + 2)
