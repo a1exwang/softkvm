@@ -39,16 +39,17 @@ def parse_kb_code(raw)
   elsif TYPES[type] == 'rel'
     # STDERR.puts "%d %06d %s %03d %08x" % [s, us, TYPES[type], code, val]
   end
-  STDERR.puts "%d %06d %s %03d %08x" % [s, us, TYPES[type], code, val]
-  [:through, raw]
+  info = "%d %06d %s %03d %08x" % [s, us, TYPES[type], code, val]
+  [:through, raw, info]
 end
 
 def main
   loop do
     raw = STDIN.read(24)
-    op, out = parse_kb_code(raw)
+    op, data, info = parse_kb_code(raw)
     if op == :through
-      STDOUT.write(out)
+      STDERR.puts(info)
+      STDOUT.write(data)
     end
   end
 end
