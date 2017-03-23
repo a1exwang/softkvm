@@ -3,6 +3,7 @@ set -xe
 
 if [ $# -ne 1 ]; then
   echo "USAGE: ./start_softkvm PORT"
+  exit 1
 fi
 
 PORT=$1
