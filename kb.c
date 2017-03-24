@@ -87,27 +87,29 @@ int main(int argc, const char **argv) {
   if (argc >= 2) {
     my_dev_name = argv[1];
   }
-  int ret;
 
   int fd = setup_uidev(my_dev_name);
   printf("Virtual uinput device created..\n");
+
   char buf[INPUT_BUFFER_SIZE];
   while (1) {
     struct input_event ev;
 
     memset(&ev, 0, sizeof(ev));
-    int n = read(0, buf, sizeof(buf));
+    ssize_t n = read(0, buf, sizeof(buf));
 
     int written = 0;
     while (written < n) {
-      written += write(fd, buf + written, n - written);
-    }
-
-    if (ret < 0) {
-      fprintf(stderr, "write file failed %d, need %d\n", ret, n);
-      break;
+      ssize_t x = write(fd, buf + written, (size_t)(n - written));
+      if (x < 0) {
+        fprintf(stderr, "write file failed %d, need %d\n", (int)x, (int)n);
+        goto cleanup;
+      }
+      written += x;
     }
   }
+
+cleanup:
 
   /* Clean up */
   ioctl(fd, UI_DEV_DESTROY);
