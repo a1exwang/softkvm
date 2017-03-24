@@ -1,9 +1,11 @@
 require 'socket'
+require 'time'
+require 'filesize'
 
 data_port = 8223
 console_port = 8222
 
-BUFFER_SIZE = 24 * 3
+BUFFER_SIZE = 24 * 10
 
 data_server = TCPServer.open('0.0.0.0', data_port)
 console_server = TCPServer.open('0.0.0.0', console_port)
@@ -68,16 +70,16 @@ def create_client(name, io)
       status: {},
       device_name: 'unknown',
       device_type: :unknown,
-      connected_at: Time.now
+      connected_at: Time.now,
+      read_bytes: 0,
+      write_bytes: 0,
   }
 end
 
 CommandError = Class.new(Exception)
 
 def all_info(fds)
-  "mux --+\n" +
-
-  fds.select do |item|
+  r = fds.select do |item|
     [:data_client, :console_client].include?(item[:name])
   end.map do |item, i|
     if item[:name] == :data_client
@@ -93,14 +95,18 @@ def all_info(fds)
     else # item[:name] == :console_client
       a = '      +CONSOLE'
     end
-    '%-12s %02d %-12s %-16s %s' % [
+    "%-12s %02d %-12s %-16s %-19s %-10s %-10s" % [
         a,
         item[:id],
         item[:device_name],
         item[:address]&.join(':'),
-        item[:connected_at]
+        item[:connected_at].strftime('%Y-%m-%d %H:%M:%S'),
+        Filesize.new(item[:read_bytes]).pretty,
+        Filesize.new(item[:write_bytes]).pretty,
     ]
   end.join("\n")
+
+  ("mux --+        id %-12s %-16s %-19s %-10s %-10s\n" % %w'name ip:port connected_at in_bytes out_bytes') + r
 end
 
 def console_exec(fds, command_line)
@@ -183,20 +189,24 @@ begin
             end
           else
             begin
-              data = item[:io].read(BUFFER_SIZE)
+              data = item[:io].read_nonblock(BUFFER_SIZE)
               STDERR.puts 'read: (%s:%d), %d bytes' % [
                   item[:io].remote_address.ip_address,
                   item[:io].remote_address.ip_port,
                   data.size
               ]
+              item[:read_bytes] += data.size
               if item[:status][:in]
                 fds.each do |tgt|
                   if tgt && tgt[:name] == :data_client && tgt[:status][:out]
+                    tgt[:write_bytes] += data.size
                     tgt[:io].write data
                   end
                 end
               end
-            rescue IOError, Errno::EPIPE
+            rescue IO::WaitReadable
+              next
+            rescue IOError, EOFError, Errno::EPIPE
               destroy_socket(fds, item[:io])
             end
           end
