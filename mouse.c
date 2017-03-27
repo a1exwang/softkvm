@@ -7,7 +7,7 @@
 #include <stdlib.h>
 
 #define INPUT_BUFFER_SIZE 0x400
-const char *MY_UIDEV_NAME = "awvkb0";
+const char *MY_UIDEV_NAME = "awvmouse0";
 
 int setup_keyboard_dev(int fd) {
   if (ioctl(fd, UI_SET_EVBIT, EV_KEY) < 0) {
@@ -23,12 +23,34 @@ int setup_keyboard_dev(int fd) {
     perror(NULL);
     exit(1);
   }
-  // It seems android does not support keycode > 256
-  for (int i = 0; i < /* KEY_CNT */ 256; ++i) {
-    if (ioctl(fd, UI_SET_KEYBIT, i) < 0) {
-      perror(NULL);
-      exit(1);
-    }
+  if (ioctl(fd, UI_SET_KEYBIT, KEY_LEFT) < 0) {
+    perror(NULL);
+    exit(1);
+  }
+  if (ioctl(fd, UI_SET_KEYBIT, KEY_RIGHT) < 0) {
+    perror(NULL);
+    exit(1);
+  }
+  if (ioctl(fd, UI_SET_KEYBIT, KEY_MIDDLE) < 0) {
+    perror(NULL);
+    exit(1);
+  }
+
+  if (ioctl(fd, UI_SET_EVBIT, EV_REL) < 0) {
+    perror(NULL);
+    exit(1);
+  }
+  if (ioctl(fd, UI_SET_RELBIT, REL_X) < 0) {
+    perror(NULL);
+    exit(1);
+  }
+  if (ioctl(fd, UI_SET_RELBIT, REL_Y) < 0) {
+    perror(NULL);
+    exit(1);
+  }
+  if (ioctl(fd, UI_SET_RELBIT, REL_WHEEL) < 0) {
+    perror(NULL);
+    exit(1);
   }
 
   return 0;
