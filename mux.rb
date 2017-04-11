@@ -1,33 +1,13 @@
 require 'socket'
 require 'time'
 require 'filesize'
+require 'set'
 
-data_port = 8223
-console_port = 8222
 
+DATA_PORT = 8223
+CONSOLE_PORT = 8222
 BUFFER_SIZE = 24 * 10
 
-data_server = TCPServer.open('0.0.0.0', data_port)
-console_server = TCPServer.open('0.0.0.0', console_port)
-
-fds = [
-    {name: :data, type: :server, io: data_server},
-    {name: :console, type: :server, io: console_server}
-]
-
-def get_fds(fds)
-  fds.map { |item| item[:io] }
-end
-def get_item_from_io(fds, io)
-  fds.find { |item| item[:io] == io }
-end
-
-def destroy_socket(fds, io)
-  io.close
-  ret = fds.find { |a| a[:io] == io }
-  fds.delete_if { |a| a[:io] ==io }
-  ret
-end
 
 def generate_id
   if @id.nil?
@@ -36,160 +16,248 @@ def generate_id
   @id += 1
 end
 
-def enable_endpoint(fds, type, id)
-  item = get_by_id(fds, id)
-  item[:status][type] = true if item
-  item
+
+module Endpoint
+  def self.enable_endpoint(meta, type, id)
+    item = FDs.get_by_id(meta, id)
+    item[:status][type] = true if item
+    item
+  end
+  def self.disable_endpoint(meta, type, id)
+    item = FDs.get_by_id(meta, id)
+    item[:status][type] = false if item
+    item
+  end
 end
 
-def disable_endpoint(fds, type, id)
-  item = get_by_id(fds, id)
-  item[:status][type] = false if item
-  item
+
+module FDs
+  def self.get_fds(meta)
+    meta[:fds].map { |item| item[:io] }
+  end
+  def self.get_item_from_io(meta, io)
+    meta[:fds].find { |item| item[:io] == io }
+  end
+
+  def self.get_by_id(meta, id)
+    meta[:fds].find { |item| item[:id] == id }
+  end
 end
 
-def get_by_id(fds, id)
-  fds.find { |item| item[:id] == id }
+
+module SocketClient
+  def self.create_client(name, io)
+    puts 'accept (%s): %s:%d => %s:%d' % [
+        name,
+        io.remote_address.ip_address,
+        io.remote_address.ip_port,
+        io.local_address.ip_address,
+        io.local_address.ip_port,
+    ]
+
+    {
+        name: "#{name}_client".to_sym,
+        type: :client,
+        id: generate_id,
+        io: io,
+        address: [io.remote_address.ip_address, io.remote_address.ip_port],
+        status: {},
+        device_name: 'unknown',
+        device_type: :unknown,
+        connected_at: Time.now,
+        read_bytes: 0,
+        write_bytes: 0,
+    }
+  end
+  def self.destroy_socket(meta, io)
+    io.close
+    fd = meta[:fds].find { |a| a[:io] == io }
+    STDERR.puts 'close: %s:%d' % [fd[:name], fd[:id]]
+    meta[:fds].delete_if { |a| a[:io] ==io }
+    fd
+  end
 end
 
-def create_client(name, io)
-  puts 'accept (%s): %s:%d => %s:%d' % [
-      name,
-      io.remote_address.ip_address,
-      io.remote_address.ip_port,
-      io.local_address.ip_address,
-      io.local_address.ip_port,
-  ]
 
-  {
-      name: "#{name}_client".to_sym,
-      type: :client,
-      id: generate_id,
-      io: io,
-      address: [io.remote_address.ip_address, io.remote_address.ip_port],
-      status: {},
-      device_name: 'unknown',
-      device_type: :unknown,
-      connected_at: Time.now,
-      read_bytes: 0,
-      write_bytes: 0,
-  }
+module Console
+  def self.channel_info(meta, client_ids, channel_name)
+    r = client_ids.map do |client_id|
+      FDs.get_by_id(meta, client_id)
+    end.map do |item|
+      if item[:name] == :data_client
+        if item[:status][:in] && item[:status][:out]
+          a = '         +<----->'
+        elsif item[:status][:in]
+          a = '         +<------'
+        elsif item[:status][:out]
+          a = '         +------>'
+        else
+          a = '         +-------'
+        end
+      else # item[:name] == :console_client
+        a = '         +CONSOLE'
+      end
+      '%-15s %02d %-12s %-16s %-21s %10s %10s' % [
+          a,
+          item[:id],
+          item[:device_name],
+          item[:address]&.join(':'),
+          item[:connected_at].strftime('%Y-%m-%d %H:%M:%S'),
+          Filesize.new(item[:read_bytes]).pretty,
+          Filesize.new(item[:write_bytes]).pretty,
+      ]
+    end.join("\n")
+
+    ("%-6s---+        %-2s %-12s %-16s %-21s %10s %10s\n" %
+        ([channel_name] + %w'id name ip:port connected_at in_bytes out_bytes')) + r
+  end
+  def self.all_info(meta)
+    client_ids = meta[:fds]
+                     .select { |item| [:data_client, :console_client].include?(item[:name]) }
+                     .map { |item| item[:id] }
+    ret = channel_info(meta, client_ids, 'NULL')
+    ret += "\n\n"
+
+    meta[:channels].keys.each do |channel_name|
+      ret += channel_info(meta, meta[:channels][channel_name][:client_ids], channel_name)
+      ret += "\n\n"
+    end
+    ret
+  end
+  def self.parse_args(args, types, help = '', strict_arg = true)
+    if strict_arg && args.size != types.size
+      raise CommandError.new("USAGE: #{help}")
+    end
+    ret = []
+    args.each_with_index do |arg, i|
+      if types[i] == Symbol
+        ret << arg.to_sym
+      elsif types[i] == Integer
+        ret << arg.to_i
+      elsif types[i] == Float
+        ret << arg.to_f
+      else
+        ret << arg
+      end
+    end
+    ret.size > 1 ? ret : ret[0]
+  end
+
+  def self.console_exec(meta, command_line)
+    STDERR.puts 'cmd: %s' % command_line
+    begin
+      command, *args = command_line.strip.split(/\s+/)
+      case command
+        when 'inputs'
+          meta[:fds].select { |fd| fd[:status][:in] }.map { |item| "#{item[:id]} #{item[:address].join(':')}" }.join("\n")
+        when 'outputs'
+          meta[:fds].select { |fd| fd[:status][:out] }.map { |item| "#{item[:id]} #{item[:address].join(':')}" }.join("\n")
+        when 'ls'
+          all_info(meta)
+        when 'en'
+          id, type = parse_args(args, [Symbol, Integer], 'en [in|out] ID')
+          Endpoint.enable_endpoint(meta, id, type)
+        when 'dis'
+          id, type = parse_args(args, [Symbol, Integer], 'dis [in|out] ID')
+          Endpoint.disable_endpoint(meta, id, type)
+        when 'get'
+          id = parse_args(args, [Integer], 'USAGE: get ID')
+          FDs.get_by_id(meta, id)
+        when 'name'
+          raise CommandError.new('USAGE: name [ID|last] NAME') unless args.size == 2
+          if args[0] == 'last'
+            meta[:fds][-1][:device_name] = args[1] if meta[:fds].size > 1
+          else
+            id, device_name = args[0].to_i, args[1]
+            item = FDs.get_by_id(meta, id)
+            if item
+              item[:device_name] = device_name
+            end
+          end
+        when 'rm'
+          id = parse_args(args, [Integer], 'USAGE: rm ID')
+          item = FDs.get_by_id(meta, id)
+          SocketClient.destroy_socket(meta, item[:io])
+        when 'mkdir'
+          channel_name = parse_args(args, [String], 'USAGE: mkdir CHANNEL_NAME')
+          meta[:channels][channel_name] = {name: channel_name, client_ids: Set.new}
+          meta[:channels].keys.join(' ')
+        when 'cp'
+          id, channel_name = parse_args(args, [Integer, Symbol],
+                                        'USAGE: cp ID CHANNEL_NAME')
+          if (channel = meta[:channels][channel_name])
+            channel[:client_ids] << id
+            id
+          else
+            raise CommandError.new('Wrong CHANNEL_NAME')
+          end
+        when 'help'
+          <<~EOF
+            ls
+            en [in|out] ID
+            dis [in|out] ID
+            get ID
+            name ID NAME
+            rm ID
+            mkdir CHANNEL_NAME
+            cp ID CHANNEL_NAME
+          EOF
+        else
+          'Pardon?'
+      end
+    rescue CommandError => e
+      e.to_s
+    end
+  end
 end
 
 CommandError = Class.new(Exception)
 
-def all_info(fds)
-  r = fds.select do |item|
-    [:data_client, :console_client].include?(item[:name])
-  end.map do |item, i|
-    if item[:name] == :data_client
-      if item[:status][:in] && item[:status][:out]
-        a = '      +<----->'
-      elsif item[:status][:in]
-        a = '      +------>'
-      elsif item[:status][:out]
-        a = '      +<------'
-      else
-        a = '      +-------'
-      end
-    else # item[:name] == :console_client
-      a = '      +CONSOLE'
-    end
-    "%-12s %02d %-12s %-16s %-19s %-10s %-10s" % [
-        a,
-        item[:id],
-        item[:device_name],
-        item[:address]&.join(':'),
-        item[:connected_at].strftime('%Y-%m-%d %H:%M:%S'),
-        Filesize.new(item[:read_bytes]).pretty,
-        Filesize.new(item[:write_bytes]).pretty,
-    ]
-  end.join("\n")
+def main
+  data_server = TCPServer.open('0.0.0.0', DATA_PORT)
+  console_server = TCPServer.open('0.0.0.0', CONSOLE_PORT)
+  meta = {
+      fds: [
+          {name: :data, type: :server, io: data_server},
+          {name: :console, type: :server, io: console_server}
+      ],
+      channels: {
+          kbs: {name: 'kbs', client_ids: Set.new},
+          mice: {name: 'mice', client_ids: Set.new},
+      }
+  }
 
-  ("mux --+        id %-12s %-16s %-19s %-10s %-10s\n" % %w'name ip:port connected_at in_bytes out_bytes') + r
-end
-
-def console_exec(fds, command_line)
   begin
-    command, *args = command_line.strip.split(/\s+/)
-    case command
-      when 'inputs'
-        fds.select { |fd| fd[:status][:in] }.map { |item| "#{item[:id]} #{item[:address].join(':')}" }.join("\n")
-      when 'outputs'
-        fds.select { |fd| fd[:status][:out] }.map { |item| "#{item[:id]} #{item[:address].join(':')}" }.join("\n")
-      when 'ls'
-        all_info(fds)
-      when 'en'
-        raise CommandError.new('USAGE: en [in|out] ID') unless args.size == 2
-        id, type = args[0].to_sym, args[1].to_i
-        enable_endpoint(fds, id, type)
-      when 'dis'
-        raise CommandError.new('USAGE: dis [in|out] ID') unless args.size == 2
-        id, type = args[0].to_sym, args[1].to_i
-        disable_endpoint(fds, id, type)
-      when 'get'
-        raise CommandError.new('USAGE: get ID') unless args.size == 1
-        id = args[0].to_i
-        get_by_id(fds, id)
-      when 'name'
-        raise CommandError.new('USAGE: name ID NAME') unless args.size == 2
-        if args[0] == 'last'
-          fds[-1][:device_name] = args[1] if fds.size > 1
-        else
-          id, device_name = args[0].to_i, args[1]
-          item = get_by_id(fds, id)
-          if item
-            item[:device_name] = device_name
-          end
-        end
-      when 'rm'
-        raise CommandError.new('USAGE: rm ID') unless args.size == 1
-        id = args[0].to_i
-        item = get_by_id(fds, id)
-        destroy_socket(fds, item[:io])
-      when 'help'
-        a = <<~EOF
-          ls
-          en [in|out] ID
-          dis [in|out] ID
-          get ID
-          name ID NAME
-          rm ID
-        EOF
-        a.strip
-      else
-        'Pardon?'
-    end
-  rescue CommandError => e
-    e.to_s
-  end
-end
-
-begin
-  loop do
-    if (ios = IO.select(get_fds(fds), [], []))
-      reads, _, _ = ios
-      reads.each do |read_io|
-        item = get_item_from_io(fds, read_io)
-        if item[:type] == :server
-          io = item[:io].accept
-          fds << create_client(item[:name], io)
-        elsif item[:type] == :client
-          if item[:io].eof?
-            STDERR.puts 'close: %s:%d' % [item[:name], item[:id]]
-            destroy_socket(fds, item[:io])
-          elsif item[:name] == :console_client
-            begin
-              command_line = item[:io].gets.strip
-              STDERR.puts 'cmd: %s' % command_line
-              result = console_exec(fds, command_line)
-              item[:io].puts result
-            rescue IOError, Errno::EPIPE
-              destroy_socket(fds, item[:io])
-            end
-          else
-            begin
-              data = item[:io].read_nonblock(BUFFER_SIZE)
+    loop do
+      if (ios = IO.select(FDs.get_fds(meta), [], []))
+        reads, _, _ = ios
+        reads.each do |read_io|
+          item = FDs.get_item_from_io(meta, read_io)
+          if item[:type] == :server
+            # New data/console connection
+            io = item[:io].accept
+            meta[:fds] << SocketClient.create_client(item[:name], io)
+          elsif item[:type] == :client
+            # Data arrived
+            if item[:io].eof?
+              # A client closed the connection
+              SocketClient.destroy_socket(meta, item[:io])
+            elsif item[:name] == :console_client
+              # Read from a console client
+              begin
+                item[:io].puts Console.console_exec(meta, item[:io].gets.strip)
+              rescue IOError, Errno::EPIPE
+                SocketClient.destroy_socket(meta, item[:io])
+              end
+            else
+              # Read from a data client
+              begin
+                data = item[:io].read_nonblock(BUFFER_SIZE)
+              rescue IO::WaitReadable
+                next
+              rescue IOError, EOFError, Errno::EPIPE
+                SocketClient.destroy_socket(meta, item[:io])
+              end
               STDERR.puts 'read: (%s:%d), %d bytes' % [
                   item[:io].remote_address.ip_address,
                   item[:io].remote_address.ip_port,
@@ -197,26 +265,28 @@ begin
               ]
               item[:read_bytes] += data.size
               if item[:status][:in]
-                fds.each do |tgt|
+                meta[:fds].each do |tgt|
                   if tgt && tgt[:name] == :data_client && tgt[:status][:out]
                     tgt[:write_bytes] += data.size
-                    tgt[:io].write data
+                    begin
+                      tgt[:io].write data
+                    rescue IOError, EOFError, Errno::EPIPE
+                      SocketClient.destroy_socket(meta, tgt[:io])
+                    end
                   end
                 end
               end
-            rescue IO::WaitReadable
-              next
-            rescue IOError, EOFError, Errno::EPIPE
-              destroy_socket(fds, item[:io])
             end
           end
         end
       end
     end
-  end
-ensure
-  fds.each do |f|
-    puts 'close: %s' % f[:name]
-    f[:io].close
+  ensure
+    meta[:fds].each do |f|
+      puts 'close: %s' % f[:name]
+      f[:io].close
+    end
   end
 end
+
+main

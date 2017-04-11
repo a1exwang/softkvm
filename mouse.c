@@ -23,15 +23,15 @@ int setup_keyboard_dev(int fd) {
     perror(NULL);
     exit(1);
   }
-  if (ioctl(fd, UI_SET_KEYBIT, KEY_LEFT) < 0) {
+  if (ioctl(fd, UI_SET_KEYBIT, BTN_LEFT) < 0) {
     perror(NULL);
     exit(1);
   }
-  if (ioctl(fd, UI_SET_KEYBIT, KEY_RIGHT) < 0) {
+  if (ioctl(fd, UI_SET_KEYBIT, BTN_RIGHT) < 0) {
     perror(NULL);
     exit(1);
   }
-  if (ioctl(fd, UI_SET_KEYBIT, KEY_MIDDLE) < 0) {
+  if (ioctl(fd, UI_SET_KEYBIT, BTN_MIDDLE) < 0) {
     perror(NULL);
     exit(1);
   }
